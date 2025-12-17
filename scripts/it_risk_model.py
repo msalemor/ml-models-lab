@@ -1,6 +1,7 @@
 """
-IT Risk Analysis Model
-Trains an ML model to classify the risk level of cloud providers.
+IT Risk Classification Model
+Classifies cloud infrastructure security risks into Low, Medium, High, and Critical categories
+based on various security and compliance factors.
 """
 
 import numpy as np
@@ -8,223 +9,275 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import joblib
 import os
+from datetime import datetime
 
 # Set random seed for reproducibility
 np.random.seed(42)
 
 def generate_mock_data(n_samples=1000):
-    """Generate mock IT risk analysis data for cloud providers"""
+    """Generate mock IT risk assessment data for cloud providers"""
     
-    # Cloud provider types
-    providers = ['AWS', 'Azure', 'GCP', 'IBM Cloud', 'Oracle Cloud', 'Other']
+    # Security and compliance factors
+    firewall_enabled = np.random.choice([0, 1], n_samples, p=[0.2, 0.8])  # 80% have firewall
+    encryption_level = np.random.choice(['None', 'Basic', 'Standard', 'Strong'], n_samples, 
+                                       p=[0.1, 0.15, 0.4, 0.35])
+    mfa_enabled = np.random.choice([0, 1], n_samples, p=[0.3, 0.7])
+    compliance_score = np.random.randint(0, 101, n_samples)  # 0-100
     
-    # Generate features
-    provider = np.random.choice(providers, n_samples)
-    uptime_percentage = np.random.uniform(95.0, 99.99, n_samples)
-    security_incidents = np.random.randint(0, 20, n_samples)
-    compliance_score = np.random.uniform(50, 100, n_samples)
-    cost_efficiency = np.random.uniform(60, 100, n_samples)
-    support_rating = np.random.uniform(3.0, 5.0, n_samples)
-    data_encryption = np.random.choice([0, 1], n_samples, p=[0.1, 0.9])  # 90% have encryption
-    backup_frequency = np.random.choice([1, 7, 14, 30], n_samples)  # days
-    response_time_hours = np.random.uniform(0.5, 48, n_samples)
+    # Infrastructure factors
+    num_security_patches = np.random.randint(0, 50, n_samples)
+    unpatched_vulnerabilities = np.random.randint(0, 100, n_samples)
+    backup_enabled = np.random.choice([0, 1], n_samples, p=[0.25, 0.75])
+    disk_encryption = np.random.choice([0, 1], n_samples, p=[0.2, 0.8])
     
-    # Calculate risk based on features
-    risk_scores = []
+    # Activity factors
+    failed_login_attempts = np.random.randint(0, 1000, n_samples)
+    unusual_traffic = np.random.choice([0, 1], n_samples, p=[0.7, 0.3])
+    privileged_access_changes = np.random.randint(0, 50, n_samples)
+    security_events_per_day = np.random.randint(0, 500, n_samples)
     
-    for i in range(n_samples):
-        score = 0
-        
-        # Uptime contribution (lower uptime = higher risk)
-        if uptime_percentage[i] < 98:
-            score += 30
-        elif uptime_percentage[i] < 99:
-            score += 20
-        elif uptime_percentage[i] < 99.5:
-            score += 10
-        
-        # Security incidents (more incidents = higher risk)
-        if security_incidents[i] > 10:
-            score += 25
-        elif security_incidents[i] > 5:
-            score += 15
-        elif security_incidents[i] > 2:
-            score += 5
-        
-        # Compliance score (lower score = higher risk)
-        if compliance_score[i] < 70:
-            score += 25
-        elif compliance_score[i] < 85:
-            score += 10
-        
-        # Encryption (no encryption = higher risk)
-        if data_encryption[i] == 0:
-            score += 20
-        
-        # Backup frequency (less frequent = higher risk)
-        if backup_frequency[i] > 14:
-            score += 15
-        elif backup_frequency[i] > 7:
-            score += 8
-        
-        # Response time (slower = higher risk)
-        if response_time_hours[i] > 24:
-            score += 15
-        elif response_time_hours[i] > 12:
-            score += 8
-        elif response_time_hours[i] > 4:
-            score += 3
-        
-        # Support rating (lower = higher risk)
-        if support_rating[i] < 3.5:
-            score += 10
-        elif support_rating[i] < 4.0:
-            score += 5
-        
-        risk_scores.append(score)
+    # Encode encryption level
+    encryption_mapping = {'None': 0, 'Basic': 1, 'Standard': 2, 'Strong': 3}
+    encryption_encoded = [encryption_mapping[e] for e in encryption_level]
     
-    # Convert scores to risk categories
-    risk_category = []
-    for score in risk_scores:
-        if score < 30:
-            risk_category.append('Low')
-        elif score < 60:
-            risk_category.append('Medium')
+    # Determine risk level based on features
+    risk_scores = (
+        (1 - firewall_enabled) * 25 +
+        (4 - np.array(encryption_encoded)) * 10 +
+        (1 - mfa_enabled) * 20 +
+        (100 - compliance_score) * 0.3 +
+        np.clip(unpatched_vulnerabilities / 10, 0, 30) +
+        (1 - backup_enabled) * 15 +
+        (1 - disk_encryption) * 15 +
+        np.clip(failed_login_attempts / 50, 0, 20) +
+        unusual_traffic * 15 +
+        np.clip(privileged_access_changes / 5, 0, 20) +
+        np.clip(security_events_per_day / 50, 0, 20)
+    )
+    
+    # Add some noise
+    risk_scores += np.random.normal(0, 5, n_samples)
+    risk_scores = np.clip(risk_scores, 0, 100)
+    
+    # Classify risks
+    def classify_risk(score):
+        if score < 25:
+            return 'Low'
+        elif score < 50:
+            return 'Medium'
+        elif score < 75:
+            return 'High'
         else:
-            risk_category.append('High')
+            return 'Critical'
     
-    # Create DataFrame
+    risk_class = [classify_risk(score) for score in risk_scores]
+    
     df = pd.DataFrame({
-        'provider': provider,
-        'uptime_percentage': uptime_percentage,
-        'security_incidents': security_incidents,
+        'firewall_enabled': firewall_enabled,
+        'encryption_level': encryption_encoded,
+        'mfa_enabled': mfa_enabled,
         'compliance_score': compliance_score,
-        'cost_efficiency': cost_efficiency,
-        'support_rating': support_rating,
-        'data_encryption': data_encryption,
-        'backup_frequency_days': backup_frequency,
-        'response_time_hours': response_time_hours,
-        'risk_category': risk_category
+        'num_security_patches': num_security_patches,
+        'unpatched_vulnerabilities': unpatched_vulnerabilities,
+        'backup_enabled': backup_enabled,
+        'disk_encryption': disk_encryption,
+        'failed_login_attempts': failed_login_attempts,
+        'unusual_traffic': unusual_traffic,
+        'privileged_access_changes': privileged_access_changes,
+        'security_events_per_day': security_events_per_day,
+        'risk_score': risk_scores,
+        'risk_class': risk_class
     })
     
     return df
 
 def train_model():
-    """Train the IT risk analysis model"""
+    """Train the IT risk classification model"""
     
-    print("Generating mock data...")
-    df = generate_mock_data(1000)
+    print("=" * 60)
+    print("IT RISK CLASSIFICATION MODEL TRAINING")
+    print("=" * 60)
     
-    # Display sample data
-    print("\nSample data:")
+    print("\nGenerating mock IT risk assessment data...")
+    df = generate_mock_data(2000)
+    
+    print("\nSample data (first 10 rows):")
     print(df.head(10))
+    
     print(f"\nDataset shape: {df.shape}")
-    print(f"\nRisk category distribution:")
-    print(df['risk_category'].value_counts())
     
-    # Encode categorical variables
-    le_provider = LabelEncoder()
-    df['provider_encoded'] = le_provider.fit_transform(df['provider'])
+    print("\nRisk class distribution:")
+    print(df['risk_class'].value_counts().sort_index())
     
-    le_risk = LabelEncoder()
-    df['risk_encoded'] = le_risk.fit_transform(df['risk_category'])
+    print("\nRisk score statistics:")
+    print(df['risk_score'].describe())
     
     # Prepare features and target
-    feature_columns = [
-        'provider_encoded', 'uptime_percentage', 'security_incidents',
-        'compliance_score', 'cost_efficiency', 'support_rating',
-        'data_encryption', 'backup_frequency_days', 'response_time_hours'
-    ]
+    feature_cols = [col for col in df.columns if col not in ['risk_score', 'risk_class']]
+    X = df[feature_cols].copy()
+    y = df['risk_class']
     
-    X = df[feature_columns]
-    y = df['risk_encoded']
+    print(f"\nFeatures used: {feature_cols}")
     
-    # Split data
+    # Split data (without stratify to avoid issues with imbalanced classes)
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+        X, y, test_size=0.2, random_state=42
     )
+    
+    print(f"\nTraining set size: {len(X_train)}")
+    print(f"Test set size: {len(X_test)}")
     
     # Scale features
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    # Train model
-    print("\nTraining model...")
+    # Train classifier
+    print("\nTraining Random Forest classifier...")
     model = RandomForestClassifier(
         n_estimators=100,
-        max_depth=10,
+        max_depth=15,
+        min_samples_split=5,
+        min_samples_leaf=2,
         random_state=42,
         n_jobs=-1
     )
+    
     model.fit(X_train_scaled, y_train)
     
-    # Evaluate model
-    train_score = model.score(X_train_scaled, y_train)
-    test_score = model.score(X_test_scaled, y_test)
-    
-    print(f"\nModel Performance:")
-    print(f"Training Accuracy: {train_score:.4f}")
-    print(f"Testing Accuracy: {test_score:.4f}")
-    
-    # Classification report
+    # Evaluate on test set
+    print("\nEvaluating model...")
     y_pred = model.predict(X_test_scaled)
+    accuracy = accuracy_score(y_test, y_pred)
+    
+    print(f"\nAccuracy: {accuracy:.4f}")
+    
     print("\nClassification Report:")
-    print(classification_report(y_test, y_pred, target_names=le_risk.classes_))
+    print(classification_report(y_test, y_pred))
+    
+    print("\nConfusion Matrix:")
+    cm = confusion_matrix(y_test, y_pred, labels=['Low', 'Medium', 'High', 'Critical'])
+    print(cm)
     
     # Feature importance
-    print("\nFeature Importances:")
-    feature_names = feature_columns
-    importances = model.feature_importances_
-    for name, importance in sorted(zip(feature_names, importances), key=lambda x: x[1], reverse=True):
-        print(f"{name}: {importance:.4f}")
+    print("\nTop 10 Most Important Features:")
+    feature_importance = pd.DataFrame({
+        'feature': feature_cols,
+        'importance': model.feature_importances_
+    }).sort_values('importance', ascending=False)
     
-    # Save model, scaler, and encoders
+    print(feature_importance.head(10).to_string(index=False))
+    
+    # Create models directory if it doesn't exist
     model_dir = os.path.join(os.path.dirname(__file__), 'models')
     os.makedirs(model_dir, exist_ok=True)
     
-    model_path = os.path.join(model_dir, 'it_risk_model.pkl')
-    scaler_path = os.path.join(model_dir, 'it_risk_scaler.pkl')
-    provider_encoder_path = os.path.join(model_dir, 'it_risk_provider_encoder.pkl')
-    risk_encoder_path = os.path.join(model_dir, 'it_risk_encoder.pkl')
+    # Save model and scaler
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    model_path = os.path.join(model_dir, f'it_risk_model_{timestamp}.joblib')
+    scaler_path = os.path.join(model_dir, f'it_risk_scaler_{timestamp}.joblib')
+    feature_cols_path = os.path.join(model_dir, f'it_risk_features_{timestamp}.joblib')
     
     joblib.dump(model, model_path)
     joblib.dump(scaler, scaler_path)
-    joblib.dump(le_provider, provider_encoder_path)
-    joblib.dump(le_risk, risk_encoder_path)
+    joblib.dump(feature_cols, feature_cols_path)
     
-    print(f"\nModel saved to: {model_path}")
+    print(f"\n{'=' * 60}")
+    print("MODEL EXPORTED SUCCESSFULLY")
+    print(f"{'=' * 60}")
+    print(f"Model saved to: {model_path}")
     print(f"Scaler saved to: {scaler_path}")
-    print(f"Provider encoder saved to: {provider_encoder_path}")
-    print(f"Risk encoder saved to: {risk_encoder_path}")
+    print(f"Features saved to: {feature_cols_path}")
     
-    # Test predictions
-    print("\nTest predictions on sample data:")
-    sample_data = pd.DataFrame({
-        'provider': ['AWS', 'Azure', 'Other'],
-        'uptime_percentage': [99.9, 98.5, 96.0],
-        'security_incidents': [1, 5, 15],
-        'compliance_score': [95, 85, 65],
-        'cost_efficiency': [90, 80, 70],
-        'support_rating': [4.5, 4.0, 3.2],
-        'data_encryption': [1, 1, 0],
-        'backup_frequency_days': [1, 7, 30],
-        'response_time_hours': [2, 8, 36]
-    })
+    # Also save test data for reference
+    test_data_path = os.path.join(model_dir, f'it_risk_test_data_{timestamp}.csv')
+    test_df = X_test.copy()
+    test_df['actual_risk'] = y_test.values
+    test_df['predicted_risk'] = y_pred
+    test_df.to_csv(test_data_path, index=False)
+    print(f"Test data saved to: {test_data_path}")
     
-    sample_data['provider_encoded'] = le_provider.transform(sample_data['provider'])
-    X_sample = sample_data[feature_columns]
-    X_sample_scaled = scaler.transform(X_sample)
-    predictions = model.predict(X_sample_scaled)
-    predicted_risks = le_risk.inverse_transform(predictions)
+    print(f"\nModel training completed!")
+    print(f"Files location: {model_dir}")
     
-    for i, (provider, risk) in enumerate(zip(sample_data['provider'], predicted_risks)):
-        print(f"Provider {i+1} ({provider}): Risk = {risk}")
+    return model, scaler, feature_cols
+
+def predict_risk(model, scaler, features_list, input_data):
+    """
+    Predict IT risk for new data
     
-    return model, scaler, le_provider, le_risk
+    Args:
+        model: Trained classifier
+        scaler: Fitted scaler
+        features_list: List of feature names in correct order
+        input_data: Dictionary or list of values for prediction
+    
+    Returns:
+        Risk class prediction and probability scores
+    """
+    # Convert input to proper format
+    if isinstance(input_data, dict):
+        X = np.array([input_data[f] for f in features_list]).reshape(1, -1)
+    else:
+        X = np.array(input_data).reshape(1, -1)
+    
+    # Scale input
+    X_scaled = scaler.transform(X)
+    
+    # Predict
+    prediction = model.predict(X_scaled)[0]
+    probabilities = model.predict_proba(X_scaled)[0]
+    
+    return prediction, probabilities, model.classes_
 
 if __name__ == "__main__":
-    train_model()
+    model, scaler, feature_cols = train_model()
+    
+    # Example prediction
+    print("\n" + "=" * 60)
+    print("EXAMPLE PREDICTION")
+    print("=" * 60)
+    
+    # Create a sample infrastructure with good security
+    sample_good = {
+        'firewall_enabled': 1,
+        'encryption_level': 3,  # Strong
+        'mfa_enabled': 1,
+        'compliance_score': 95,
+        'num_security_patches': 45,
+        'unpatched_vulnerabilities': 2,
+        'backup_enabled': 1,
+        'disk_encryption': 1,
+        'failed_login_attempts': 10,
+        'unusual_traffic': 0,
+        'privileged_access_changes': 2,
+        'security_events_per_day': 50
+    }
+    
+    # Create a sample infrastructure with poor security
+    sample_poor = {
+        'firewall_enabled': 0,
+        'encryption_level': 0,  # None
+        'mfa_enabled': 0,
+        'compliance_score': 20,
+        'num_security_patches': 5,
+        'unpatched_vulnerabilities': 85,
+        'backup_enabled': 0,
+        'disk_encryption': 0,
+        'failed_login_attempts': 500,
+        'unusual_traffic': 1,
+        'privileged_access_changes': 40,
+        'security_events_per_day': 450
+    }
+    
+    for label, sample in [("Well-Secured Infrastructure", sample_good), 
+                          ("Poorly-Secured Infrastructure", sample_poor)]:
+        risk_class, probs, classes = predict_risk(model, scaler, feature_cols, sample)
+        print(f"\n{label}:")
+        print(f"  Predicted Risk Class: {risk_class}")
+        print(f"  Risk Probabilities:")
+        for cls, prob in zip(classes, probs):
+            print(f"    {cls}: {prob:.4f}")
